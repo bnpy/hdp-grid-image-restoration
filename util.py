@@ -2,18 +2,22 @@ import numpy as np
 from PIL import Image
 
 
-def imread(fileName):
+def imread(fileName, outputFormat='L'):
     '''
-        Read in an image and return its gray-scale pixel values (normalized)
+        Read in an image, and return its normalized pixel values (gray scale by default)
     '''
     im = Image.open(fileName)
-    W, H = im.size
+    W, H = im.size[:2]
     try:
-        im = im.convert('L')
+        im = im.convert(outputFormat)
     except:
-        raise TypeError('Unable to convert image %s from %s to gray!' % (fileName, im.mode))
-    result = np.zeros((H, W), dtype=np.float64)
+        raise TypeError('Unable to convert image %s from %s to %s!' % (fileName, im.mode, outputFormat))
     imPix = im.load()
+    if outputFormat == 'L':
+        result = np.zeros((H, W), dtype=np.float64)
+    else:
+        assert outputFormat == 'YCbCr'
+        result = np.zeros((H, W, 3), dtype=np.float64)
     for i in xrange(W):
         for j in xrange(H):
             result[j, i] = imPix[i, j]
@@ -31,7 +35,6 @@ def imwrite(I, fileName, fmt='PNG'):
 def im2col(I, patchSize, stride=1):
     if type(patchSize) is int:
         patchSize = [patchSize, patchSize]
-    # Parameters
     I = I.T
     M, N = I.shape
     col_extent = N - patchSize[1] + 1
@@ -54,3 +57,15 @@ def col2im(Z, patchSize, mm, nn, normalize=True):
         I /= np.bincount(temp)
     I = np.reshape(I, (mm, nn))
     return I
+
+
+def ycbcr2rgb(image):
+    H, W, C = image.shape
+    assert C == 3
+    x = Image.fromarray(np.uint8(np.round(255 * image)),
+              mode='YCbCr').convert('RGB').load()
+    result = np.zeros(image.shape)
+    for h in xrange(H):
+        for w in xrange(W):
+            result[h, w] = x[w, h]
+    return result / 255

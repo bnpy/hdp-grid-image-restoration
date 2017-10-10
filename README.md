@@ -22,13 +22,15 @@ git clone https://github.com/bnpy/hdp-grid-image-restoration.git
 ```sh
 python demo.py
 ```
-It will run the two demos in the `demo.py` file.
+It will run the three demos in the `demo.py` file.
 
 The first demo is written in function `demo_eDP()`, in which the Barbara image is first polluted by additive white Gaussian noisy with standard deviation 25, and then gets denoised by our external DP Grid method. The denoised image would be saved in png format, and should match the middle right plot shown in Figure 3 of our paper.
 
 The second demo is written in function `demo_HDP()`, in which the airplane image is polluted by the same amount of noise as above. It would get denoised by our HDP Grid method. The saved output should match the bottom right plot in Figure 8.
 
-Depending on the speed of your computer, each demo may take up to 15~30 minutes to run.
+The last demo is written in function `demo_inpainting()`, where the HDP Grid method would inpaint the New Orleans image, and the saved output should match the bottom right plot shown in Figure 7.
+
+Depending on the speed of your computer, the two denoising demos may each take up to 15~30 minutes to run, and the inpainting one could take about two hours.
 
 
 ## Reference

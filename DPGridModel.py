@@ -121,7 +121,7 @@ class DPGridModel(object):
         return x, u, uPart, logPi
 
     def _initX(self, y):
-        return y
+        return y.copy()
 
     def _initU(self, y):
         patchSize = int(np.sqrt(self.D))
@@ -135,11 +135,14 @@ class DPGridModel(object):
     def _initLogPi(self):
         return self.GP.logPi
 
-    def update_z(self, beta, logPi, x, u, uPart):
+    def update_z(self, beta, logPi, x, u, uPart, patchLst=None, IP=None):
         # fully observable patches
-        IP = self.calcIterationParams(beta)
+        if IP is None:
+            IP = self.calcIterationParams(beta)
         D, K, GP, patchSize = self.D, self.K, self.GP, int(np.sqrt(self.D))
         Px_minus_u = im2col(x, patchSize) - u
+        if patchLst is not None:
+            Px_minus_u = Px_minus_u[:, patchLst]
         NFull = Px_minus_u.shape[1]
         resp = np.tile(logPi + 0.5*(IP.logdetSigma + GP.logdetLam), (NFull, 1))
         for k in xrange(K):
@@ -184,11 +187,14 @@ class DPGridModel(object):
         IP.setField('logdetSigma', logdetSigma, dims='K')
         return IP
 
-    def update_v(self, beta, x, u, uPart, resp, respPart):
+    def update_v(self, beta, x, u, uPart, resp, respPart, patchLst=None, IP=None):
         # fully observable patches
-        IP = self.calcIterationParams(beta)
+        if IP is None:
+            IP = self.calcIterationParams(beta)
         D, K, GP, patchSize = self.D, self.K, self.GP, int(np.sqrt(self.D))
         Px_minus_u = im2col(x, patchSize) - u
+        if patchLst is not None:
+            Px_minus_u = Px_minus_u[:, patchLst]
         NFull = Px_minus_u.shape[1]
         v = np.zeros((NFull, D))
         for k in xrange(K):
@@ -219,12 +225,14 @@ class DPGridModel(object):
             vPart[mask] = this_v
         return v, vPart
 
-    def update_u(self, beta, x, v, vPart):
+    def update_u(self, beta, x, v, vPart, patchLst=None):
         # fully observable patches
         D, GP, patchSize = self.D, self.GP, int(np.sqrt(self.D))
         beta2inv = 1.0 / beta**2
         gamma2 = 1.0 / (1.0 / GP.s2 + D * beta2inv)
         patches = im2col(x, patchSize)
+        if patchLst is not None:
+            patches = patches[:, patchLst]
         Px_minus_v = patches.T - v
         u = gamma2 * (GP.r / GP.s2 + beta2inv * np.sum(Px_minus_v, axis=1))
         # partially observable patches

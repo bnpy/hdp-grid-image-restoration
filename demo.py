@@ -24,6 +24,17 @@ def demo_HDP():
     imwrite(x, 'HDP_results.png')
 
 
+def demo_inpainting():
+    inFileName = 'images/new_original.png'
+    y = imread(inFileName, outputFormat='YCbCr')
+    maskFileName = 'images/new_mask.png'
+    mask = np.array(imread(maskFileName), dtype=bool)
+    gridModel = HDPGridModel('models/HDP')
+    x = gridModel.inpaint(y, mask)
+    imwrite(x, 'HDP_inpainting_results.png')
+
+
 if __name__ == '__main__':
     demo_eDP()
     demo_HDP()
+    demo_inpainting()

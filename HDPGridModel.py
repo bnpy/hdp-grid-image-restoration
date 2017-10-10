@@ -7,7 +7,7 @@ from bnpy.init.FromScratchBregman import runKMeans_BregmanDiv
 from bnpy.ioutil.SuffStatBagIO import loadSuffStatBag
 from bnpy.obsmodel import ZeroMeanGaussObsModel
 from bnpy.util import EPS
-from util import im2col
+from util import im2col, col2im, ycbcr2rgb
 from DPGridModel import DPGridModel
 
 
@@ -51,15 +51,20 @@ class HDPGridModel(DPGridModel):
         return x, finalPSNR
 
     def update_pi(self, Nk):
-        theta = self.GP.alphaPi0 + Nk
+        theta = self.GP.alphaPi0 + Nk / self.D
         logPi = psi(theta) - psi(np.sum(theta) + self.GP.alphaPi0Rem)
         return logPi
 
-    def train_image_specific_topics(self, y, sigma, Niter=50, Kfresh=100):
+    def train_image_specific_topics(self, y, sigma, Niter=50, Kfresh=100, pixelMask=None):
         print('Training %d image-specific clusters...' % Kfresh)
         D, patchSize, GP = self.D, int(np.sqrt(self.D)), self.GP
         # gather fully observable patches
-        v = im2col(y, patchSize)
+        if pixelMask is None:  # gray-scale image denoising
+            v = im2col(y, patchSize)
+        else:  # color image inpainting
+            C = 3
+            patchMask = np.logical_not(np.any(im2col(pixelMask, patchSize), axis=0))
+            v = np.hstack(tuple([im2col(y[:, :, c], patchSize)[:, patchMask] for c in xrange(C)]))
         v -= np.mean(v, axis=0)
         v = v.T
         testData = GroupXData(X=v, doc_range=[0, len(v)], nDocTotal=1)
@@ -108,11 +113,70 @@ class HDPGridModel(DPGridModel):
         self.patchModel.update_global_params(combinedSS)
         self.calcGlobalParams()
 
-    def get_N(self, resp, respPart, do_divide_D=True):
+    def get_N(self, resp, respPart):
         N = np.bincount(resp, minlength=self.K)
         for mask in self.PgnPart.keys():
             N += np.bincount(respPart[mask], minlength=self.K)
         N = np.array(N, dtype=np.float64)
-        if do_divide_D:
-            N /= self.D
         return N
+
+    def inpaint(self, y, pixelMask, T=20, **kwargs):
+        self.print_inpainting_info(y)
+        betas = 1.0 / np.sqrt(10 * np.array([1, 2, 16, 128, 512]))
+        D, patchSize = self.D, int(np.sqrt(self.D))
+        if np.any(pixelMask[:patchSize]) or np.any(pixelMask[:, :patchSize]) or \
+            np.any(pixelMask[-patchSize+1:]) or np.any(pixelMask[:, -patchSize+1:]):
+            raise ValueError('The current implementation does not support inpainting boundary pixels!')
+        self.PgnPart = dict()
+        self.train_image_specific_topics(y, betas[-1], pixelMask=pixelMask, **kwargs)
+        mask_unseen = np.any(im2col(pixelMask, patchSize), axis=0)
+        mask_seen = np.logical_not(mask_unseen)
+        result = y.copy()
+        result[pixelMask] = self.GP.r
+        if y.ndim == 3:
+            C = 3
+        else:
+            raise TypeError('The current implementation only supports color-image inpainting!')
+        for c in xrange(C):
+            print('Inpainting channel %d/%d...' % (c+1, C))
+            x, u, uPart, logPi = self.init_x_u_logPi(result[:, :, c])
+            resp_seen, respPart = self.update_z(betas[-1], logPi, x, u, uPart, patchLst=mask_seen)
+            v_seen, vPart = self.update_v(betas[-1], x, u, uPart, resp_seen, respPart, patchLst=mask_seen)
+            u_seen, uPart = self.update_u(betas[-1], x, v_seen, vPart, patchLst=mask_seen)
+            for i, beta in enumerate(betas):
+                print('  beta value %d/%d' % (i+1, len(betas)))
+                IP = self.calcIterationParams(beta)
+                for t in xrange(T):
+                    resp_unseen, respPart = self.update_z(beta, logPi, x, u, uPart,
+                                                          patchLst=mask_unseen, IP=IP)
+                    v_unseen, vPart = self.update_v(beta, x, u, uPart, resp_unseen, respPart,
+                                                    patchLst=mask_unseen, IP=IP)
+                    u_unseen, uPart = self.update_u(beta, x, v_unseen, vPart,
+                                                    patchLst=mask_unseen)
+                    logPi = self.update_pi(self.get_N(np.concatenate((resp_seen, resp_unseen)), respPart))
+                    NFull = len(mask_seen)
+                    v, u = np.zeros((NFull, D)), np.zeros(NFull)
+                    v[mask_seen] = v_seen
+                    v[mask_unseen] = v_unseen
+                    u[mask_seen] = u_seen
+                    u[mask_unseen] = u_unseen
+                    x = self.update_x_by_inpainting(result[:, :, c], v, u, pixelMask)
+                    print '    inner iteration %d/%d' % (t+1, T)
+            result[:, :, c] = x
+        result = ycbcr2rgb(self.clip_pixel_intensity(result))
+        return result
+
+    def print_inpainting_info(self, y):
+        patchSz = int(np.sqrt(self.D))
+        print('Pretrained %s: K = %d clusters' % (self.__class__.__name__, self.K))
+        print('Patch size: D = %d x %d pixels' % (patchSz, patchSz))
+        print('Image size: %d x %d pixels' % y.shape[:2])
+
+    def update_x_by_inpainting(self, y, v, u, pixelMask):
+        H, W = y.shape
+        patchSize = int(np.sqrt(self.D))
+        rec_from_patches = col2im(v.T+u, patchSize, H, W)
+        x = np.zeros((H, W))
+        x[~pixelMask] = y[~pixelMask]
+        x[pixelMask] = rec_from_patches[pixelMask]
+        return x
