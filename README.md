@@ -42,4 +42,4 @@ Depending on the speed of your computer, the two denoising demos may each take u
         year={2017}
     }
 
-For questions, please contact: Geng Ji (gji@cs.brown.edu).
+For questions, please contact: Geng Ji (gji1@uci.edu).
